@@ -3,9 +3,11 @@
 #include <chrono>
 #include <iomanip>
 
-#define PGI_ACC_TIME 1
-
 #define arraySize 10000000
+
+#ifndef nThreads
+#define nThreads 80
+#endif
 
 #ifdef Double
 using floatingType = double;
@@ -21,14 +23,13 @@ int main(int argc, char const *argv[])
 
     auto allProgramStart = std::chrono::high_resolution_clock::now();
 
-    #pragma acc enter data create(array[0:arraySize], sum) copyin(pi)
-    
+
 #ifdef CPU
     auto allCycles = std::chrono::high_resolution_clock::now();
     auto firstCycle = std::chrono::high_resolution_clock::now();
 #endif
 
-    #pragma acc parallel loop present(array[0:arraySize],sum)
+#pragma omp parallel for num_threads(nThreads)
     for(int i = 0; i < arraySize; i++){
         array[i] = sin(2 * pi*i/arraySize);
     }
@@ -38,7 +39,7 @@ int main(int argc, char const *argv[])
     auto secondCycle = std::chrono::high_resolution_clock::now();
 #endif
 
-    #pragma acc parallel loop present(array[0:arraySize],sum) reduction(+:sum)
+#pragma omp parallel for reduction(+:sum) num_threads(nThreads)
     for(int i = 0; i < arraySize; i++){
         sum += array[i];
     }
@@ -47,8 +48,6 @@ int main(int argc, char const *argv[])
     auto allCyclesElapsed = std::chrono::high_resolution_clock::now() - allCycles;
     auto secondCycleElapsed = std::chrono::high_resolution_clock::now() - secondCycle;
 #endif
-
-    #pragma acc exit data copyout(sum) delete(array[0:arraySize], pi)
 
     auto allProgramElapsed = std::chrono::high_resolution_clock::now() - allProgramStart;
     long long programMicro = std::chrono::duration_cast<std::chrono::microseconds>(allProgramElapsed).count();
