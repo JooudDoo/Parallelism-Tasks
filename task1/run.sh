@@ -53,7 +53,6 @@ while test $# -gt 0; do
         runFile "./t1_Float_MultiCore.mp" "t1_Float_MultiCore MP"
         runFile "./t1_Double_OneCore.pg" "t1_Double_OneCore PGC"
         runFile "./t1_Float_OneCore.pg" "t1_Float_OneCore PGC"
-        exit 0
         ;;
     *)
         break
