@@ -4,7 +4,9 @@
 #include <math.h>
 #include <cmath>
 
+#ifdef OPENACC__
 #include <openacc.h>
+#endif
 
 #define at(arr, x, y) (arr[(x)*n+(y)]) 
 
@@ -92,8 +94,10 @@ int main(int argc, char *argv[]){
         F = Fnew;
         Fnew = swap;
 
+#ifdef OPENACC__
         acc_attach((void**)F);
         acc_attach((void**)Fnew);
+#endif
 
         iteration++;
     } while(iteration < iterations && error > eps);
