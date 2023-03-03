@@ -7,6 +7,9 @@
 #ifdef OPENACC__
 #include <openacc.h>
 #endif
+#ifdef NVPROF_
+#include </opt/nvidia/hpc_sdk/Linux_x86_64/22.11/cuda/11.8/targets/x86_64-linux/include/nvtx3/nvToolsExt.h>
+#endif
 
 #define at(arr, x, y) (arr[(x)*n+(y)]) 
 
@@ -36,6 +39,8 @@ T extractNumber(char* arr){
     }
     return result;
 }
+
+constexpr int ITERS_BETWEEN_UPDATE = 5;
 
 int main(int argc, char *argv[]){
 
@@ -77,12 +82,20 @@ int main(int argc, char *argv[]){
     double error = 0;
     int iteration = 0;
 
-    #pragma acc enter data copyin(Fnew[:n*m], F[:n*m])
+    int itersBetweenUpdate = 0;
 
+    #pragma acc enter data copyin(Fnew[:n*m], F[:n*m], error)
+
+#ifdef NVPROF_
+    nvtxRangePush("MainCycle");
+#endif
     do {
-        error = 0;
+        #pragma acc parallel present(error) async(0)
+        {
+            error = 0;
+        }
 
-        #pragma acc parallel loop collapse(2) present(Fnew[:n*m], F[:n*m]) reduction(max:error) vector_length(128)
+        #pragma acc parallel loop collapse(2) present(Fnew[:n*m], F[:n*m], error) reduction(max:error) vector_length(128) async(0)
         for(int x = 1; x < n-1; x++){
             for(int y= 1; y < m-1; y++){
                 at(Fnew,x,y) = 0.25 * (at(F, x+1,y) + at(F,x-1,y) + at(F,x,y-1) + at(F,x,y+1));
@@ -98,11 +111,21 @@ int main(int argc, char *argv[]){
         acc_attach((void**)F);
         acc_attach((void**)Fnew);
 #endif
-
+        if(itersBetweenUpdate >= ITERS_BETWEEN_UPDATE && iteration < iterations){
+            #pragma acc update self(error) wait
+            itersBetweenUpdate = -1;
+        }
+        else{
+            error = 1;
+        }
         iteration++;
+        itersBetweenUpdate++;
     } while(iteration < iterations && error > eps);
- 
-    #pragma acc exit data delete(Fnew[:n*m]) copyout(F[:n*m])
+#ifdef NVPROF_
+    nvtxRangePop();
+#endif
+
+    #pragma acc exit data delete(Fnew[:n*m]) copyout(F[:n*m], error)
 
     std::cout << "Iterations: " << iteration << std::endl;
     std::cout << "Error: " << error << std::endl;
