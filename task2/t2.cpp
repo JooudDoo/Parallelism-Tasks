@@ -90,12 +90,14 @@ int main(int argc, char *argv[]){
     nvtxRangePush("MainCycle");
 #endif
     do {
-        #pragma acc parallel present(error) async(0)
-        {
+        #pragma acc serial present(error) async
+        {   
+            
+            #pragma acc atomic write
             error = 0;
         }
 
-        #pragma acc parallel loop collapse(2) present(Fnew[:n*m], F[:n*m], error) reduction(max:error) vector_length(128) async(0)
+        #pragma acc parallel loop collapse(2) present(Fnew[:n*m], F[:n*m], error) reduction(max:error) vector_length(128) async
         for(int x = 1; x < n-1; x++){
             for(int y= 1; y < m-1; y++){
                 at(Fnew,x,y) = 0.25 * (at(F, x+1,y) + at(F,x-1,y) + at(F,x,y-1) + at(F,x,y+1));
