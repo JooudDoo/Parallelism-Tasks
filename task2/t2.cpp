@@ -13,12 +13,23 @@
 
 #define at(arr, x, y) (arr[(x)*n+(y)]) 
 
+constexpr int LEFT_UP = 10;
+constexpr int LEFT_DOWN = 20;
+constexpr int RIGHT_UP = 20;
+constexpr int RIGHT_DOWN = 30;
+
+
 void initArrays(double* mainArr, double* subArr, int& n, int& m){
     std::memset(mainArr, 0, sizeof(double)*(n)*(m));
-    at(mainArr, 0, 0) = 10;
-    at(mainArr, 0, m-1) = 20;
-    at(mainArr, n-1, 0) = 20;
-    at(mainArr, n-1, m-1) = 30;
+
+    for(int i = 0; i < n*n; i++){
+        mainArr[i] = (LEFT_UP+LEFT_DOWN+RIGHT_UP+RIGHT_DOWN)/4;
+    }
+
+    at(mainArr, 0, 0) = LEFT_UP;
+    at(mainArr, 0, m-1) = RIGHT_UP;
+    at(mainArr, n-1, 0) = LEFT_DOWN;
+    at(mainArr, n-1, m-1) = RIGHT_DOWN;
     for(int i = 1; i < n-1; i++){
         at(mainArr,0,i) = (at(mainArr,0,m-1)-at(mainArr,0,0))/(m-1)*i+at(mainArr,0,0);
         at(mainArr,i,0) = (at(mainArr,n-1,0)-at(mainArr,0,0))/(n-1)*i+at(mainArr,0,0);
