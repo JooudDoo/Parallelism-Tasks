@@ -20,10 +20,10 @@ constexpr int LEFT_DOWN = 20;
 constexpr int RIGHT_UP = 20;
 constexpr int RIGHT_DOWN = 30;
 
-void initArrays(double* mainArr, double* subArr, int& n, int& m){
+void initArrays(double* mainArr, double* subArr, int& n, int& m, bool initUsingMean){
     std::memset(mainArr, 0, sizeof(double)*(n)*(m));
 
-    for(int i = 0; i < n*n; i++){
+    for(int i = 0; i < n*n && initUsingMean; i++){
         mainArr[i] = (LEFT_UP+LEFT_DOWN+RIGHT_UP+RIGHT_DOWN)/4;
     }
 
@@ -57,6 +57,7 @@ constexpr double negOne = -1;
 int main(int argc, char *argv[]){
 
     bool showResultArr = false;
+    bool initUsingMean = false;
     double eps = 1E-6;
     int iterations = 1E6;
     int n = 10;
@@ -79,6 +80,9 @@ int main(int argc, char *argv[]){
         else if(std::strcmp(argv[arg], "-show") == 0){
             showResultArr = true;
         }
+        else if(std::strcmp(argv[arg], "-O") == 0){
+            initUsingMean = true;
+        }
     }
 
     std::cout << "Current settings:" << std::endl;
@@ -91,9 +95,9 @@ int main(int argc, char *argv[]){
 
     double* inter = new double[n*m];
 
-    initArrays(F, Fnew, n, m);
+    initArrays(F, Fnew, n, m, initUsingMean);
 
-    double error = 0;
+    double error = 1;
     int iteration = 0;
 
     int itersBetweenUpdate = 0;
@@ -128,20 +132,20 @@ int main(int argc, char *argv[]){
 #endif
 
         if(itersBetweenUpdate >= ITERS_BETWEEN_UPDATE && iteration < iterations){
-
+            
             #pragma acc data present(inter[:n*m], Fnew[:n*m], F[:n*m]) wait
             {
                 #pragma acc host_data use_device(Fnew, F, inter)
                 {
 
                     status = cublasDcopy(handle, n*m, F, 1, inter, 1);
-                    if(status != CUBLAS_STATUS_SUCCESS) exit(30);
+                    if(status != CUBLAS_STATUS_SUCCESS) std::cout << "copy error" << std::endl, exit(30);
 
                     status = cublasDaxpy(handle, n*m, &negOne, Fnew, 1, inter, 1);
-                    if(status != CUBLAS_STATUS_SUCCESS) exit(40);
-
+                    if(status != CUBLAS_STATUS_SUCCESS) std::cout << "sum error" << std::endl, exit(40);
+                    
                     status = cublasIdamax(handle, n*m, inter, 1, &max_idx);
-                    if(status != CUBLAS_STATUS_SUCCESS) exit(42);
+                    if(status != CUBLAS_STATUS_SUCCESS) std::cout << "abs max error" << std::endl, exit(41);
                 }
             }
 
@@ -149,9 +153,6 @@ int main(int argc, char *argv[]){
             error = fabs(inter[max_idx]);
 
             itersBetweenUpdate = -1;
-        }
-        else{
-            error = 1;
         }
         iteration++;
         itersBetweenUpdate++;
