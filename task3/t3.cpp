@@ -11,13 +11,14 @@
 #include </opt/nvidia/hpc_sdk/Linux_x86_64/22.11/cuda/11.8/targets/x86_64-linux/include/nvtx3/nvToolsExt.h>
 #endif
 
+#include <cublas_v2.h>
+
 #define at(arr, x, y) (arr[(x)*n+(y)]) 
 
 constexpr int LEFT_UP = 10;
 constexpr int LEFT_DOWN = 20;
 constexpr int RIGHT_UP = 20;
 constexpr int RIGHT_DOWN = 30;
-
 
 void initArrays(double* mainArr, double* subArr, int& n, int& m){
     std::memset(mainArr, 0, sizeof(double)*(n)*(m));
@@ -33,7 +34,6 @@ void initArrays(double* mainArr, double* subArr, int& n, int& m){
     for(int i = 1; i < n-1; i++){
         at(mainArr,0,i) = (at(mainArr,0,m-1)-at(mainArr,0,0))/(m-1)*i+at(mainArr,0,0);
         at(mainArr,i,0) = (at(mainArr,n-1,0)-at(mainArr,0,0))/(n-1)*i+at(mainArr,0,0);
-
         at(mainArr,n-1,i) = (at(mainArr,n-1,m-1)-at(mainArr,n-1,0))/(m-1)*i+at(mainArr,n-1,0);
         at(mainArr,i,m-1) = (at(mainArr,n-1,m-1)-at(mainArr,0,m-1))/(m-1)*i+at(mainArr,0,m-1);
     }
@@ -52,6 +52,7 @@ T extractNumber(char* arr){
 }
 
 constexpr int ITERS_BETWEEN_UPDATE = 5;
+constexpr double negOne = -1;
 
 int main(int argc, char *argv[]){
 
@@ -88,6 +89,8 @@ int main(int argc, char *argv[]){
     double* F = new double[n*m];
     double* Fnew = new double[n*m];
 
+    double* inter = new double[n*m];
+
     initArrays(F, Fnew, n, m);
 
     double error = 0;
@@ -95,22 +98,23 @@ int main(int argc, char *argv[]){
 
     int itersBetweenUpdate = 0;
 
-    #pragma acc enter data copyin(Fnew[:n*m], F[:n*m], error)
+    cublasHandle_t handle;
+
+    cublasCreate(&handle);
+
+    cublasStatus_t status;
+    int max_idx = 0;
+
+    #pragma acc enter data copyin(Fnew[:n*m], F[:n*m], inter[:n*m])
 
 #ifdef NVPROF_
     nvtxRangePush("MainCycle");
 #endif
     do {
-        #pragma acc parallel present(error) async
-        {
-            error = 0;
-        }
-
-        #pragma acc parallel loop collapse(2) present(Fnew[:n*m], F[:n*m], error) reduction(max:error) vector_length(128) async
+        #pragma acc parallel loop collapse(2) present(Fnew[:n*m], F[:n*m]) vector_length(128) async
         for(int x = 1; x < n-1; x++){
             for(int y= 1; y < m-1; y++){
                 at(Fnew,x,y) = 0.25 * (at(F, x+1,y) + at(F,x-1,y) + at(F,x,y-1) + at(F,x,y+1));
-                error = fmax(error, fabs(at(Fnew,x,y) - at(F,x,y)));
             }
         }
 
@@ -122,8 +126,28 @@ int main(int argc, char *argv[]){
         acc_attach((void**)F);
         acc_attach((void**)Fnew);
 #endif
+
         if(itersBetweenUpdate >= ITERS_BETWEEN_UPDATE && iteration < iterations){
-            #pragma acc update self(error) wait
+
+            #pragma acc data present(inter[:n*m], Fnew[:n*m], F[:n*m]) wait
+            {
+                #pragma acc host_data use_device(Fnew, F, inter)
+                {
+
+                    status = cublasDcopy(handle, n*m, F, 1, inter, 1);
+                    if(status != CUBLAS_STATUS_SUCCESS) exit(30);
+
+                    status = cublasDaxpy(handle, n*m, &negOne, Fnew, 1, inter, 1);
+                    if(status != CUBLAS_STATUS_SUCCESS) exit(40);
+
+                    status = cublasIdamax(handle, n*m, inter, 1, &max_idx);
+                    if(status != CUBLAS_STATUS_SUCCESS) exit(42);
+                }
+            }
+
+            #pragma acc update self(inter[:n*m])
+            error = fabs(inter[max_idx]);
+
             itersBetweenUpdate = -1;
         }
         else{
@@ -132,11 +156,13 @@ int main(int argc, char *argv[]){
         iteration++;
         itersBetweenUpdate++;
     } while(iteration < iterations && error > eps);
+
 #ifdef NVPROF_
     nvtxRangePop();
 #endif
 
-    #pragma acc exit data delete(Fnew[:n*m]) copyout(F[:n*m], error)
+    #pragma acc exit data delete(Fnew[:n*m]) copyout(F[:n*m])
+    cublasDestroy(handle);
 
     std::cout << "Iterations: " << iteration << std::endl;
     std::cout << "Error: " << error << std::endl;
