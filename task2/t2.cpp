@@ -19,10 +19,10 @@ constexpr int RIGHT_UP = 20;
 constexpr int RIGHT_DOWN = 30;
 
 
-void initArrays(double* mainArr, double* subArr, int& n, int& m){
+void initArrays(double* mainArr, double* subArr, int& n, int& m, bool initUsingMean){
     std::memset(mainArr, 0, sizeof(double)*(n)*(m));
 
-    for(int i = 0; i < n*n; i++){
+    for(int i = 0; i < n*n && initUsingMean; i++){
         mainArr[i] = (LEFT_UP+LEFT_DOWN+RIGHT_UP+RIGHT_DOWN)/4;
     }
 
@@ -56,6 +56,7 @@ constexpr int ITERS_BETWEEN_UPDATE = 5;
 int main(int argc, char *argv[]){
 
     bool showResultArr = false;
+    bool initUsingMean = false;
     double eps = 1E-6;
     int iterations = 1E6;
     int n = 10;
@@ -78,6 +79,9 @@ int main(int argc, char *argv[]){
         else if(std::strcmp(argv[arg], "-show") == 0){
             showResultArr = true;
         }
+        else if(std::strcmp(argv[arg], "-O") == 0){
+            initUsingMean = true;
+        }
     }
 
     std::cout << "Current settings:" << std::endl;
@@ -88,7 +92,7 @@ int main(int argc, char *argv[]){
     double* F = new double[n*m];
     double* Fnew = new double[n*m];
 
-    initArrays(F, Fnew, n, m);
+    initArrays(F, Fnew, n, m, initUsingMean);
 
     double error = 0;
     int iteration = 0;
