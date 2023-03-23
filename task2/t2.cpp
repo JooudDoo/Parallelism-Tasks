@@ -51,7 +51,7 @@ T extractNumber(char* arr){
     return result;
 }
 
-constexpr int ITERS_BETWEEN_UPDATE = 5;
+constexpr int ITERS_BETWEEN_UPDATE = 75;
 
 int main(int argc, char *argv[]){
 
