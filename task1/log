@@ -1,7 +1,0 @@
-   Run t1_Double_GPU
-----
-
-   Run t1_Float_GPU
-----
-
-   Run t1_Double_MultiCore PGC
