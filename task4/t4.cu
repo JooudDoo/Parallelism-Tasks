@@ -16,6 +16,8 @@ void initArrays(double* mainArr, double* main_D, double* sub_D, cmdArgs* args);
 
 __global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int* iterationsElapsed);
 
+__global__ void iterate(double* F, double* Fnew, cmdArgs* args);
+
 int main(int argc, char *argv[]){
     cmdArgs args = cmdArgs{false, false, 1E-6, (int)1E6, 10, 10}; // create default command line arguments 
     processArgs(argc, argv, &args);
@@ -106,10 +108,10 @@ __global__ void iterate(double* F, double* Fnew, cmdArgs* args){
 }
 
 __global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int* iterationsElapsed){
-    printf("%d %d\n", blockIdx.x, threadIdx.x);
 
+    *error = 1;
     do {
-        
+
         iterate<<<args->n-1, args->m-1>>>(F, Fnew, args);
 
         double* swap = F;
