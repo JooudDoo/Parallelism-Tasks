@@ -1,5 +1,9 @@
 #include <iostream>
 
+#include <cub/block/block_load.cuh>
+#include <cub/block/block_store.cuh>
+#include <cub/block/block_reduce.cuh>
+
 #include "cuda_runtime.h"
 
 #include "sub.cuh" // contains functions for processing arguments and displaying them
@@ -107,12 +111,41 @@ __global__ void iterate(double* F, double* Fnew, cmdArgs* args){
     at(Fnew, blockIdx.x, threadIdx.x) = 0.25 * (at(F, blockIdx.x+1, threadIdx.x) + at(F, blockIdx.x-1, threadIdx.x) + at(F, blockIdx.x, threadIdx.x+1) + at(F, blockIdx.x, threadIdx.x-1));
 }
 
+
+template <
+    int                     BLOCK_THREADS,
+    int                     ITEMS_PER_THREAD>
+__global__ void reduce(const double* in1, const double* in2, double* out)
+{
+    using namespace cub;
+
+    typedef BlockReduce<double, BLOCK_THREADS> BlockReduceT;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+    double in[ITEMS_PER_THREAD];
+
+    int indx = blockIdx.x * blockDim.x * ITEMS_PER_THREAD + threadIdx.x;
+
+    for(size_t i = 0; i < ITEMS_PER_THREAD; i++){
+        in[i] = fabs(in1[indx+i] - in2[indx+i]);
+    }
+
+    double aggregate = BlockReduceT(temp_storage).Reduce(in, cub::Max());
+
+    if (threadIdx.x == 0)
+    {
+        *out = aggregate;
+    }
+}
+
+
 __global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int* iterationsElapsed){
 
     *error = 1;
     do {
 
         iterate<<<args->n-1, args->m-1>>>(F, Fnew, args);
+        reduce<128, 128><<<1, 128>>>(F, Fnew, error);
+        __syncthreads();
 
         double* swap = F;
         F = Fnew;
