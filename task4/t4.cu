@@ -22,6 +22,9 @@ __global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int
 
 __global__ void iterate(double* F, double* Fnew, cmdArgs* args);
 
+template <int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void reduce(const double* in1, const double* in2, double* out);
+
 int main(int argc, char *argv[]){
     cmdArgs args = cmdArgs{false, false, 1E-6, (int)1E6, 10, 10}; // create default command line arguments 
     processArgs(argc, argv, &args);
@@ -131,8 +134,7 @@ __global__ void reduce(const double* in1, const double* in2, double* out)
 
     double aggregate = BlockReduceT(temp_storage).Reduce(in, cub::Max());
 
-    if (threadIdx.x == 0)
-    {
+    if (threadIdx.x == 0){
         *out = aggregate;
     }
 }
