@@ -149,8 +149,8 @@ int main(int argc, char *argv[]){
                 }
             }
 
-            #pragma acc update self(inter[max_idx])
-            error = fabs(inter[max_idx]);
+            #pragma acc update self(inter[max_idx-1])
+            error = fabs(inter[max_idx-1]);
 
             itersBetweenUpdate = -1;
         }
