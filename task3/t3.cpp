@@ -51,7 +51,7 @@ T extractNumber(char* arr){
     return result;
 }
 
-constexpr int ITERS_BETWEEN_UPDATE = 250;
+constexpr int ITERS_BETWEEN_UPDATE = 75;
 constexpr double negOne = -1;
 
 int main(int argc, char *argv[]){
@@ -149,7 +149,7 @@ int main(int argc, char *argv[]){
                 }
             }
 
-            #pragma acc update self(inter[max_idx-1])
+            #pragma acc update self(inter[max_idx-1]) wait
             error = fabs(inter[max_idx-1]);
 
             itersBetweenUpdate = -1;
