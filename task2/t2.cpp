@@ -130,7 +130,7 @@ int main(int argc, char *argv[]){
             #pragma acc update self(error) wait
             itersBetweenUpdate = -1;
         }
-        else{
+        else {
             error = 1;
         }
         iteration++;
@@ -139,8 +139,8 @@ int main(int argc, char *argv[]){
 #ifdef NVPROF_
     nvtxRangePop();
 #endif
-
-    #pragma acc exit data delete(Fnew[:n*m]) copyout(F[:n*m], error)
+    #pragma acc update self(error) wait
+    #pragma acc exit data delete(Fnew[:n*m]) copyout(F[:n*m], error) wait
 
     std::cout << "Iterations: " << iteration << std::endl;
     std::cout << "Error: " << error << std::endl;
