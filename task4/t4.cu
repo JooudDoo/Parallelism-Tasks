@@ -114,6 +114,9 @@ __global__ void iterate(double* F, double* Fnew, cmdArgs* args){
     at(Fnew, blockIdx.x, threadIdx.x) = 0.25 * (at(F, blockIdx.x+1, threadIdx.x) + at(F, blockIdx.x-1, threadIdx.x) + at(F, blockIdx.x, threadIdx.x+1) + at(F, blockIdx.x, threadIdx.x-1));
 }
 
+__device__ __forceinline__ double atomicMaxDouble (double * addr, double value) {
+    return __longlong_as_double(atomicMax((long long *)addr, __double_as_longlong(value)));
+}
 
 template <
     int                     BLOCK_THREADS,
@@ -121,21 +124,21 @@ template <
 __global__ void reduce(const double* in1, const double* in2, double* out)
 {
     using namespace cub;
-
     typedef BlockReduce<double, BLOCK_THREADS> BlockReduceT;
     __shared__ typename BlockReduceT::TempStorage temp_storage;
-    double in[ITEMS_PER_THREAD];
 
     int indx = blockIdx.x * blockDim.x * ITEMS_PER_THREAD + threadIdx.x;
+    double localMax = 0.0;
 
-    for(size_t i = 0; i < ITEMS_PER_THREAD; i++){
-        in[i] = fabs(in1[indx+i] - in2[indx+i]);
+    for(int j = 0; j < ITEMS_PER_THREAD && j < ITEMS_PER_THREAD; j++){
+        double diff = fabs(in1[indx + j] - in2[indx + j]);
+        localMax = fmax(localMax, diff);
     }
 
-    double aggregate = BlockReduceT(temp_storage).Reduce(in, cub::Max());
+    double aggregate = BlockReduceT(temp_storage).Reduce(localMax, cub::Max());
 
     if (threadIdx.x == 0){
-        *out = aggregate;
+        atomicMaxDouble(out, aggregate);
     }
 }
 
@@ -145,10 +148,10 @@ __global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int
     *error = 1;
     do {
 
+        *error = 0;
         iterate<<<args->n-1, args->m-1>>>(F, Fnew, args);
-        reduce<128, 128><<<1, 128>>>(F, Fnew, error);
-        __syncthreads();
-
+        reduce<1024, 16><<<std::ceil(args->n * args->m / (1024.0 * 16)), 1024>>>(F, Fnew, error);
+        cudaDeviceSynchronize();
         double* swap = F;
         F = Fnew;
         Fnew = swap;
