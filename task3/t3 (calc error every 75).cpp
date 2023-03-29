@@ -131,23 +131,23 @@ int main(int argc, char *argv[]){
         acc_attach((void**)Fnew);
 #endif
 
-    #pragma acc data present(inter[:n*m], Fnew[:n*m], F[:n*m]) async
-        {
-    #pragma acc host_data use_device(Fnew, F, inter)
-            {
-
-                status = cublasDcopy(handle, n*m, F, 1, inter, 1);
-                if(status != CUBLAS_STATUS_SUCCESS) std::cout << "copy error" << std::endl, exit(30);
-
-                status = cublasDaxpy(handle, n*m, &negOne, Fnew, 1, inter, 1);
-                if(status != CUBLAS_STATUS_SUCCESS) std::cout << "sum error" << std::endl, exit(40);
-                
-                status = cublasIdamax(handle, n*m, inter, 1, &max_idx);
-                if(status != CUBLAS_STATUS_SUCCESS) std::cout << "abs max error" << std::endl, exit(41);
-            }
-        }
-
         if(itersBetweenUpdate >= ITERS_BETWEEN_UPDATE && iteration < iterations){
+            
+            #pragma acc data present(inter[:n*m], Fnew[:n*m], F[:n*m]) async
+                {
+            #pragma acc host_data use_device(Fnew, F, inter)
+                    {
+
+                        status = cublasDcopy(handle, n*m, F, 1, inter, 1);
+                        if(status != CUBLAS_STATUS_SUCCESS) std::cout << "copy error" << std::endl, exit(30);
+
+                        status = cublasDaxpy(handle, n*m, &negOne, Fnew, 1, inter, 1);
+                        if(status != CUBLAS_STATUS_SUCCESS) std::cout << "sum error" << std::endl, exit(40);
+                        
+                        status = cublasIdamax(handle, n*m, inter, 1, &max_idx);
+                        if(status != CUBLAS_STATUS_SUCCESS) std::cout << "abs max error" << std::endl, exit(41);
+                    }
+                }
 
             #pragma acc update self(inter[max_idx-1]) wait
             error = fabs(inter[max_idx-1]);
