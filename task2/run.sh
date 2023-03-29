@@ -41,21 +41,21 @@ while test $# -gt 0; do
         ;;
     -gpu)
         shift
-        runFile "./t2_GPU.pg" "t2_GPU"
+        runFile "./bin/t2_GPU.pg" "t2_GPU"
         ;;
     -pgMult)
         shift
-        runFile "./t2_MultiCore.pg" "t2_MultiCore PGC"
+        runFile "./bin/t2_MultiCore.pg" "t2_MultiCore PGC"
         ;;
     -pgOne)
         shift
-        runFile "./t2_OneCore.pg" "t2_OneCore PGC"
+        runFile "./bin/t2_OneCore.pg" "t2_OneCore PGC"
         ;;
     -all)
         shift
-        runFile "./t2_GPU.pg" "t2_GPU"
-        runFile "./t2_MultiCore.pg" "t2_MultiCore PGC"
-        runFile "./t2_OneCore.pg" "t2_OneCore PGC"
+        runFile "./bin/t2_GPU.pg" "t2_GPU"
+        runFile "./bin/t2_MultiCore.pg" "t2_MultiCore PGC"
+        runFile "./bin/t2_OneCore.pg" "t2_OneCore PGC"
         ;;
     *)
         break
