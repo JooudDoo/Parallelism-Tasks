@@ -1,14 +1,20 @@
 #include <iostream>
 
-#include <cub/block/block_load.cuh>
-#include <cub/block/block_store.cuh>
+#include <cub/cub.cuh>
 #include <cub/block/block_reduce.cuh>
 
 #include "cuda_runtime.h"
 
 #include "sub.cuh" // contains functions for processing arguments and displaying them
 
-#define at(arr, x, y) (arr[(x)*(n)+(y)])
+#ifdef NVPROF_
+#include </opt/nvidia/hpc_sdk/Linux_x86_64/22.11/cuda/11.8/targets/x86_64-linux/include/nvtx3/nvToolsExt.h>
+#endif
+
+#define at(arr, x, y) (arr[(x) * (n) + (y)])
+
+constexpr int MAXIMUM_THREADS_PER_BLOCK = 32;
+constexpr int THREADS_PER_BLOCK_REDUCE = 256;
 
 // Cornerns
 constexpr int LEFT_UP = 10;
@@ -16,67 +22,110 @@ constexpr int LEFT_DOWN = 20;
 constexpr int RIGHT_UP = 20;
 constexpr int RIGHT_DOWN = 30;
 
-void initArrays(double* mainArr, double* main_D, double* sub_D, cmdArgs* args);
+constexpr int ITERS_BETWEEN_UPDATE = 400;
 
-__global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int* iterationsElapsed);
+void initArrays(double *mainArr, double *main_D, double *sub_D, cmdArgs *args);
 
-__global__ void iterate(double* F, double* Fnew, cmdArgs* args);
+__global__ void iterate(double *F, double *Fnew, const cmdArgs *args);
 
-template <int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__global__ void reduce(const double* in1, const double* in2, double* out);
+__global__ void block_reduce(const double *in1, const double *in2, const int n, double *out);
 
 int main(int argc, char *argv[]){
-    cmdArgs args = cmdArgs{false, false, 1E-6, (int)1E6, 10, 10}; // create default command line arguments 
+    cudaSetDevice(2);
+    cmdArgs args = cmdArgs{false, false, 1E-6, (int)1E6, 10, 10}; // create default command line arguments
     processArgs(argc, argv, &args);
     printSettings(&args);
 
-    double* F_H;
-    double* F_D, *Fnew_D;
-    size_t size = args.n*args.m*sizeof(double);
+    double *F_H;
+    double *F_D, *Fnew_D;
+    size_t size = args.n * args.m * sizeof(double);
+    double error = 0;
+    int iterationsElapsed = 0;
 
     cudaMalloc(&F_D, size);
     cudaMalloc(&Fnew_D, size);
-    F_H = (double*)calloc(sizeof(double), size);
+
+    F_H = (double *)calloc(sizeof(double), size);
 
     initArrays(F_H, F_D, Fnew_D, &args);
 
-// Основной алгоритм здесь
-
-    int iterationsElapsed = 0;
-    double error = 0;
+#ifdef NVPROF_
+    nvtxRangePush("MainCycle");
+#endif
     {
-        cmdArgs* args_d;
-        double* error_d;
-        int* iterations_d;
-        cudaMalloc(&args_d, sizeof(cmdArgs));
-        cudaMalloc(&error_d, sizeof(double));
-        cudaMalloc(&iterations_d, sizeof(int));
+        size_t grid_size = args.n * args.m;
 
+        cmdArgs *args_d;
+        cudaMalloc(&args_d, sizeof(cmdArgs));
         cudaMemcpy(args_d, &args, sizeof(cmdArgs), cudaMemcpyHostToDevice);
 
-        solve<<<1, 1>>>(F_D, Fnew_D, args_d, error_d, iterations_d);
+        int num_blocks_reduce = (grid_size + THREADS_PER_BLOCK_REDUCE - 1) / THREADS_PER_BLOCK_REDUCE;
 
-        cudaMemcpy(&error, error_d, sizeof(double), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&iterationsElapsed, iterations_d, sizeof(int), cudaMemcpyDeviceToHost);
+        double *error_reduction;
+        cudaMalloc(&error_reduction, sizeof(double) * num_blocks_reduce);
+        double *error_d;
+        cudaMalloc(&error_d, sizeof(double));
+
+        // prepare graph
+        cudaStream_t stream;
+        cudaStreamCreate(&stream);
+        cudaGraph_t graph;
+        cudaGraphExec_t graph_instance;
+
+        // prepare reduction
+        void *d_temp_storage = nullptr;
+        size_t temp_storage_bytes = 0;
+        cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce, stream);
+        cudaMalloc(&d_temp_storage, temp_storage_bytes);
+
+        cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, 1024, stream);
+
+        cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+        dim3 threadPerBlock = dim3((args.n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK, (args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK);
+        dim3 blocksPerGrid = dim3((args.n + ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK),
+            (args.n + ((args.n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK));
+
+        for (size_t i = 0; i < ITERS_BETWEEN_UPDATE / 2; i++) {
+            iterate<<<blocksPerGrid, threadPerBlock, 0, stream>>>(F_D, Fnew_D, args_d);
+            iterate<<<blocksPerGrid, threadPerBlock, 0, stream>>>(Fnew_D, F_D, args_d);
+        }
+
+        cudaStreamEndCapture(stream, &graph);
+        cudaGraphInstantiate(&graph_instance, graph, NULL, NULL, 0);
+
+        do {
+
+            cudaGraphLaunch(graph_instance, stream);
+            cudaDeviceSynchronize();
+
+            block_reduce<<<num_blocks_reduce, THREADS_PER_BLOCK_REDUCE>>>(F_D, Fnew_D, grid_size, error_reduction);
+            cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce, stream);
+
+            cudaMemcpy(&error, error_d, sizeof(double), cudaMemcpyDeviceToHost);
+
+            iterationsElapsed += ITERS_BETWEEN_UPDATE;
+        } while (error > args.eps && iterationsElapsed < args.iterations);
+
+        cudaGraphDestroy(graph);
+        cudaStreamDestroy(stream);
         
-        cudaFree(error_d);
-        cudaFree(args_d);
-        cudaFree(iterations_d);
     }
-
-// ----------------------
+#ifdef NVPROF_
+    nvtxRangePop();
+#endif
 
     std::cout << "Iterations: " << iterationsElapsed << std::endl;
     std::cout << "Error: " << error << std::endl;
-    if(args.showResultArr){
-        cudaMemcpy(F_H, F_D, size, cudaMemcpyDeviceToHost);
-        int n = args.n;
-        for(int x = 0; x < args.n; x++){
-            for(int y = 0; y < args.m; y++){ 
-                std::cout << at(F_H, x, y) << ' ';
-            }
-            std::cout << std::endl;
+    if (args.showResultArr) {
+    cudaMemcpy(F_H, Fnew_D, size, cudaMemcpyDeviceToHost);
+    int n = args.n;
+    for (int x = 0; x < args.n; x++) {
+        for (int y = 0; y < args.m; y++) {
+            std::cout << at(F_H, x, y) << ' ';
         }
+        std::cout << std::endl;
+    }
     }
 
     cudaFree(F_D);
@@ -85,77 +134,59 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
-void initArrays(double* mainArr, double* main_D, double* sub_D, cmdArgs* args){
+void initArrays(double *mainArr, double *main_D, double *sub_D, cmdArgs *args){
     int n = args->n;
     int m = args->m;
-    size_t size = n*m*sizeof(double);
+    size_t size = n * m * sizeof(double);
 
-    for(int i = 0; i < n*m && args->initUsingMean; i++){
-        mainArr[i] = (LEFT_UP+LEFT_DOWN+RIGHT_UP+RIGHT_DOWN)/4;
+    for (int i = 0; i < n * m && args->initUsingMean; i++)
+    {
+    mainArr[i] = (LEFT_UP + LEFT_DOWN + RIGHT_UP + RIGHT_DOWN) / 4;
     }
 
     at(mainArr, 0, 0) = LEFT_UP;
-    at(mainArr, 0, m-1) = RIGHT_UP;
-    at(mainArr, n-1, 0) = LEFT_DOWN;
-    at(mainArr, n-1, m-1) = RIGHT_DOWN;
-    for(int i = 1; i < n-1; i++){
-        at(mainArr,0,i) = (at(mainArr,0,m-1)-at(mainArr,0,0))/(m-1)*i+at(mainArr,0,0);
-        at(mainArr,i,0) = (at(mainArr,n-1,0)-at(mainArr,0,0))/(n-1)*i+at(mainArr,0,0);
-        at(mainArr,n-1,i) = (at(mainArr,n-1,m-1)-at(mainArr,n-1,0))/(m-1)*i+at(mainArr,n-1,0);
-        at(mainArr,i,m-1) = (at(mainArr,n-1,m-1)-at(mainArr,0,m-1))/(m-1)*i+at(mainArr,0,m-1);
+    at(mainArr, 0, m - 1) = RIGHT_UP;
+    at(mainArr, n - 1, 0) = LEFT_DOWN;
+    at(mainArr, n - 1, m - 1) = RIGHT_DOWN;
+    for (int i = 1; i < n - 1; i++)
+    {
+    at(mainArr, 0, i) = (at(mainArr, 0, m - 1) - at(mainArr, 0, 0)) / (m - 1) * i + at(mainArr, 0, 0);
+    at(mainArr, i, 0) = (at(mainArr, n - 1, 0) - at(mainArr, 0, 0)) / (n - 1) * i + at(mainArr, 0, 0);
+    at(mainArr, n - 1, i) = (at(mainArr, n - 1, m - 1) - at(mainArr, n - 1, 0)) / (m - 1) * i + at(mainArr, n - 1, 0);
+    at(mainArr, i, m - 1) = (at(mainArr, n - 1, m - 1) - at(mainArr, 0, m - 1)) / (m - 1) * i + at(mainArr, 0, m - 1);
     }
     cudaMemcpy(main_D, mainArr, size, cudaMemcpyHostToDevice);
     cudaMemcpy(sub_D, mainArr, size, cudaMemcpyHostToDevice);
 }
 
-__global__ void iterate(double* F, double* Fnew, cmdArgs* args){
-    if(blockIdx.x == 0 || threadIdx.x == 0) return; // Dont update borders
+__global__ void iterate(double *F, double *Fnew, const cmdArgs *args){
+
+    int j = blockIdx.x * blockDim.x + threadIdx.x; // blockIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y; // threadIdx.x;
+
+    if (j == 0 || i == 0 || i == args->n - 1 || j == args->n - 1)
+    return; // Dont update borders
+
     int n = args->n;
-    at(Fnew, blockIdx.x, threadIdx.x) = 0.25 * (at(F, blockIdx.x+1, threadIdx.x) + at(F, blockIdx.x-1, threadIdx.x) + at(F, blockIdx.x, threadIdx.x+1) + at(F, blockIdx.x, threadIdx.x-1));
+    at(Fnew, i, j) = 0.25 * (at(F, i + 1, j) + at(F, i - 1, j) + at(F, i, j + 1) + at(F, i, j - 1));
 }
 
-__device__ __forceinline__ double atomicMaxDouble (double * addr, double value) {
-    return __longlong_as_double(atomicMax((long long *)addr, __double_as_longlong(value)));
-}
+__global__ void block_reduce(const double *in1, const double *in2, const int n, double *out){
+    typedef cub::BlockReduce<double, 256> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
 
-template <
-    int                     BLOCK_THREADS,
-    int                     ITEMS_PER_THREAD>
-__global__ void reduce(const double* in1, const double* in2, double* out)
-{
-    using namespace cub;
-    typedef BlockReduce<double, BLOCK_THREADS> BlockReduceT;
-    __shared__ typename BlockReduceT::TempStorage temp_storage;
+    double max_diff = 0;
 
-    int indx = blockIdx.x * blockDim.x * ITEMS_PER_THREAD + threadIdx.x;
-    double localMax = 0.0;
-
-    for(int j = 0; j < ITEMS_PER_THREAD && j < ITEMS_PER_THREAD; j++){
-        double diff = fabs(in1[indx + j] - in2[indx + j]);
-        localMax = fmax(localMax, diff);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x)
+    {
+    double diff = abs(in1[i] - in2[i]);
+    max_diff = fmax(diff, max_diff);
     }
 
-    double aggregate = BlockReduceT(temp_storage).Reduce(localMax, cub::Max());
+    double block_max_diff = BlockReduce(temp_storage).Reduce(max_diff, cub::Max());
 
-    if (threadIdx.x == 0){
-        atomicMaxDouble(out, aggregate);
+    if (threadIdx.x == 0)
+    {
+    out[blockIdx.x] = block_max_diff;
     }
-}
-
-
-__global__ void solve(double* F, double* Fnew, cmdArgs* args, double* error, int* iterationsElapsed){
-
-    *error = 1;
-    do {
-
-        *error = 0;
-        iterate<<<args->n-1, args->m-1>>>(F, Fnew, args);
-        reduce<1024, 16><<<std::ceil(args->n * args->m / (1024.0 * 16)), 1024>>>(F, Fnew, error);
-        cudaDeviceSynchronize();
-        double* swap = F;
-        F = Fnew;
-        Fnew = swap;
-
-        (*iterationsElapsed)++;
-    } while(*error > args->eps && *iterationsElapsed < args->iterations);
 }
