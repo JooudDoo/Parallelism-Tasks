@@ -52,9 +52,7 @@ int main(int argc, char *argv[]){
 
     initArrays(F_H, F_D, Fnew_D, &args);
 
-#ifdef NVPROF_
-    nvtxRangePush("MainCycle");
-#endif
+
     {
         size_t grid_size = args.n * args.m;
 
@@ -96,7 +94,9 @@ int main(int argc, char *argv[]){
 
         cudaStreamEndCapture(stream, &graph);
         cudaGraphInstantiate(&graph_instance, graph, NULL, NULL, 0);
-
+#ifdef NVPROF_
+    nvtxRangePush("MainCycle");
+#endif
         do {
 
             cudaGraphLaunch(graph_instance, stream);
@@ -109,14 +109,14 @@ int main(int argc, char *argv[]){
 
             iterationsElapsed += ITERS_BETWEEN_UPDATE;
         } while (error > args.eps && iterationsElapsed < args.iterations);
-
+#ifdef NVPROF_
+    nvtxRangePop();
+#endif
         cudaGraphDestroy(graph);
         cudaStreamDestroy(stream);
         
     }
-#ifdef NVPROF_
-    nvtxRangePop();
-#endif
+
 
     std::cout << "Iterations: " << iterationsElapsed << std::endl;
     std::cout << "Error: " << error << std::endl;
