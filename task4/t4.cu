@@ -13,6 +13,7 @@
 
 #define at(arr, x, y) (arr[(x) * (n) + (y)])
 
+// Values
 constexpr int MAXIMUM_THREADS_PER_BLOCK = 32;
 constexpr int THREADS_PER_BLOCK_REDUCE = 256;
 
@@ -22,8 +23,10 @@ constexpr int LEFT_DOWN = 20;
 constexpr int RIGHT_UP = 20;
 constexpr int RIGHT_DOWN = 30;
 
+// Other values
 constexpr int ITERS_BETWEEN_UPDATE = 400;
 
+// Function definitions
 void initArrays(double *mainArr, double *main_D, double *sub_D, cmdArgs *args);
 
 __global__ void iterate(double *F, double *Fnew, const cmdArgs *args);
@@ -31,7 +34,7 @@ __global__ void iterate(double *F, double *Fnew, const cmdArgs *args);
 __global__ void block_reduce(const double *in1, const double *in2, const int n, double *out);
 
 int main(int argc, char *argv[]){
-    cudaSetDevice(2);
+    cudaSetDevice(2); // selecting free GPU device
     cmdArgs args = cmdArgs{false, false, 1E-6, (int)1E6, 10, 10}; // create default command line arguments
     processArgs(argc, argv, &args);
     printSettings(&args);
@@ -161,11 +164,10 @@ void initArrays(double *mainArr, double *main_D, double *sub_D, cmdArgs *args){
 
 __global__ void iterate(double *F, double *Fnew, const cmdArgs *args){
 
-    int j = blockIdx.x * blockDim.x + threadIdx.x; // blockIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y; // threadIdx.x;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (j == 0 || i == 0 || i == args->n - 1 || j == args->n - 1)
-    return; // Dont update borders
+    if (j == 0 || i == 0 || i == args->n - 1 || j == args->n - 1) return; // Don't update borders
 
     int n = args->n;
     at(Fnew, i, j) = 0.25 * (at(F, i + 1, j) + at(F, i - 1, j) + at(F, i, j + 1) + at(F, i, j - 1));
