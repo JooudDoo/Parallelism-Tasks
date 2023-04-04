@@ -15,6 +15,10 @@
 
 #define at(arr, x, y) (arr[(x)*(n)+(y)])
 
+// Values
+constexpr int MAXIMUM_THREADS_PER_BLOCK = 32;
+constexpr int THREADS_PER_BLOCK_REDUCE = 256;
+
 // Cornerns
 constexpr int LEFT_UP = 10;
 constexpr int LEFT_DOWN = 20;
@@ -71,7 +75,7 @@ int main(int argc, char *argv[]){
         cudaFree(iterations_d);
     }
 #ifdef NVPROF_
-    nvxtRangePop();
+    nvtxRangePop();
 #endif
 
 // ----------------------
@@ -130,13 +134,39 @@ __global__ void iterate(double* F, double* Fnew, double* subs, const cmdArgs* ar
     at(subs, i, j) = fabs(at(Fnew, i, j) - at(F, i, j));
 }
 
+__global__ void block_reduce(const double *in1, const double *in2, const int n, double *out){
+    typedef cub::BlockReduce<double, 256> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+
+    double max_diff = 0;
+
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x)
+    {
+    double diff = abs(in1[i] - in2[i]);
+    max_diff = fmax(diff, max_diff);
+    }
+
+    double block_max_diff = BlockReduce(temp_storage).Reduce(max_diff, cub::Max());
+
+    if (threadIdx.x == 0)
+    {
+    out[blockIdx.x] = block_max_diff;
+    }
+}
+
 __global__ void solve(double* F, double* Fnew, double* subs, cmdArgs* args, double* error, int* iterationsElapsed){
     *error = 1;
 
     size_t size = args->n * args->m;
 
-    dim3 threadPerBlock = dim3(32, 32);
-    dim3 blocksPerGrid = dim3((args->m+threadPerBlock.x-1)/threadPerBlock.x,(args->m+threadPerBlock.y-1)/threadPerBlock.y);
+    dim3 threadPerBlock = dim3((args->n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK, (args->m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK);
+    dim3 blocksPerGrid = dim3((args->n + ((args->m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args->m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK),
+            (args->n + ((args->n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args->m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK));
+
+    int num_blocks_reduce = (size + THREADS_PER_BLOCK_REDUCE - 1) / THREADS_PER_BLOCK_REDUCE;
+
+    double *error_reduction;
+    cudaMalloc(&error_reduction, sizeof(double) * num_blocks_reduce);
 
     void* d_temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
@@ -147,10 +177,9 @@ __global__ void solve(double* F, double* Fnew, double* subs, cmdArgs* args, doub
         *error = 1;
         iterate<<<blocksPerGrid, threadPerBlock>>>(F, Fnew, subs, args);
 
+        block_reduce<<<num_blocks_reduce, THREADS_PER_BLOCK_REDUCE>>>(F, Fnew, size, error_reduction);
+        cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error, num_blocks_reduce);
 
-        cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, subs, error, size);
-
-        cudaDeviceSynchronize();
         double* swap = F;
         F = Fnew;
         Fnew = swap;
