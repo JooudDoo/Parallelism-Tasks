@@ -52,7 +52,6 @@ int main(int argc, char *argv[]){
 
     initArrays(F_H, F_D, Fnew_D, &args);
 
-
     {
         size_t grid_size = args.n * args.m;
 
@@ -98,7 +97,6 @@ int main(int argc, char *argv[]){
     nvtxRangePush("MainCycle");
 #endif
         do {
-
             cudaGraphLaunch(graph_instance, stream);
             cudaDeviceSynchronize();
 
@@ -142,21 +140,20 @@ void initArrays(double *mainArr, double *main_D, double *sub_D, cmdArgs *args){
     int m = args->m;
     size_t size = n * m * sizeof(double);
 
-    for (int i = 0; i < n * m && args->initUsingMean; i++)
-    {
-    mainArr[i] = (LEFT_UP + LEFT_DOWN + RIGHT_UP + RIGHT_DOWN) / 4;
+    for (int i = 0; i < n * m && args->initUsingMean; i++){
+        mainArr[i] = (LEFT_UP + LEFT_DOWN + RIGHT_UP + RIGHT_DOWN) / 4;
     }
 
     at(mainArr, 0, 0) = LEFT_UP;
     at(mainArr, 0, m - 1) = RIGHT_UP;
     at(mainArr, n - 1, 0) = LEFT_DOWN;
     at(mainArr, n - 1, m - 1) = RIGHT_DOWN;
-    for (int i = 1; i < n - 1; i++)
-    {
-    at(mainArr, 0, i) = (at(mainArr, 0, m - 1) - at(mainArr, 0, 0)) / (m - 1) * i + at(mainArr, 0, 0);
-    at(mainArr, i, 0) = (at(mainArr, n - 1, 0) - at(mainArr, 0, 0)) / (n - 1) * i + at(mainArr, 0, 0);
-    at(mainArr, n - 1, i) = (at(mainArr, n - 1, m - 1) - at(mainArr, n - 1, 0)) / (m - 1) * i + at(mainArr, n - 1, 0);
-    at(mainArr, i, m - 1) = (at(mainArr, n - 1, m - 1) - at(mainArr, 0, m - 1)) / (m - 1) * i + at(mainArr, 0, m - 1);
+
+    for (int i = 1; i < n - 1; i++) {
+        at(mainArr, 0, i) = (at(mainArr, 0, m - 1) - at(mainArr, 0, 0)) / (m - 1) * i + at(mainArr, 0, 0);
+        at(mainArr, i, 0) = (at(mainArr, n - 1, 0) - at(mainArr, 0, 0)) / (n - 1) * i + at(mainArr, 0, 0);
+        at(mainArr, n - 1, i) = (at(mainArr, n - 1, m - 1) - at(mainArr, n - 1, 0)) / (m - 1) * i + at(mainArr, n - 1, 0);
+        at(mainArr, i, m - 1) = (at(mainArr, n - 1, m - 1) - at(mainArr, 0, m - 1)) / (m - 1) * i + at(mainArr, 0, m - 1);
     }
     cudaMemcpy(main_D, mainArr, size, cudaMemcpyHostToDevice);
     cudaMemcpy(sub_D, mainArr, size, cudaMemcpyHostToDevice);
@@ -179,10 +176,9 @@ __global__ void block_reduce(const double *in1, const double *in2, const int n, 
 
     double max_diff = 0;
 
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x)
-    {
-    double diff = abs(in1[i] - in2[i]);
-    max_diff = fmax(diff, max_diff);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
+        double diff = abs(in1[i] - in2[i]);
+        max_diff = fmax(diff, max_diff);
     }
 
     double block_max_diff = BlockReduce(temp_storage).Reduce(max_diff, cub::Max());
