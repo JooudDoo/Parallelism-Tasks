@@ -253,7 +253,7 @@ __global__ void iterate(double *F, double *Fnew, const cmdArgs *args){
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (j == 0 || i == 0 || i == args->n - 1 || j == args->m - 1) return; // Don't update borders
+    if (j == 0 || i == 0 || i >= args->n - 1 || j >= args->m - 1) return; // Don't update borders
 
     int n = args->m;
     at(Fnew, i, j) = 0.25 * (at(F, i + 1, j) + at(F, i - 1, j) + at(F, i, j + 1) + at(F, i, j - 1));

@@ -1,4 +1,3 @@
-
 #include <mpi.h>
 #include <nccl.h>
 
@@ -256,7 +255,6 @@ int main(int argc, char *argv[]) {
                     DEBUG1_PRINTF("iters: %d error: %lf\n", iterationsElapsed, error);
                 }
                 MPI_Bcast(&error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-                MPI_Barrier(MPI_COMM_WORLD);
             }
         }
     } while(error > global_args.eps && iterationsElapsed < global_args.iterations);
