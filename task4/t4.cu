@@ -15,7 +15,7 @@
 
 // Values
 constexpr int MAXIMUM_THREADS_PER_BLOCK = 32;
-constexpr int THREADS_PER_BLOCK_REDUCE = 256;
+constexpr int THREADS_PER_BLOCK_REDUCE = 32;
 
 // Cornerns
 constexpr int LEFT_UP = 10;
@@ -78,13 +78,28 @@ int main(int argc, char *argv[]){
         cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce, stream);
         cudaMalloc(&d_temp_storage, temp_storage_bytes);
 
-        cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, 1024, stream);
+        cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, args.n, stream);
 
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
 
-        dim3 threadPerBlock = dim3((args.n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK, (args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK);
-        dim3 blocksPerGrid = dim3((args.n + ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK),
-            (args.n + ((args.n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK));
+        // = ((n + 32 -1)/32, 32)
+        // = (n + 32 - 1, m + 32 - 1)
+
+        // dim3 threadPerBlock = dim3((args.n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK, (args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK);
+        // dim3 blocksPerGrid =  dim3((args.n + ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args.n + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK),
+                                //    (args.m + ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK) - 1) / ((args.m + MAXIMUM_THREADS_PER_BLOCK - 1) / MAXIMUM_THREADS_PER_BLOCK));
+
+        dim3 threadPerBlock {(unsigned int)(args.n + MAXIMUM_THREADS_PER_BLOCK - 1)/MAXIMUM_THREADS_PER_BLOCK,
+                            (unsigned int)(args.m + MAXIMUM_THREADS_PER_BLOCK - 1)/MAXIMUM_THREADS_PER_BLOCK}; // ПЕРЕОСМЫСЛИТЬ
+        if(threadPerBlock.x > 32){
+            threadPerBlock.x = 32;
+        }
+        if(threadPerBlock.y > 32){
+            threadPerBlock.y = 32;
+        } 
+        dim3 blocksPerGrid {(args.n + threadPerBlock.x - 1)/threadPerBlock.x,
+                            (args.m + threadPerBlock.y - 1)/threadPerBlock.y}; // ПЕРЕОСМЫСЛИТЬ
+
 
         for (size_t i = 0; i < ITERS_BETWEEN_UPDATE / 2; i++) {
             iterate<<<blocksPerGrid, threadPerBlock, 0, stream>>>(F_D, Fnew_D, args_d);
@@ -102,9 +117,8 @@ int main(int argc, char *argv[]){
 
             block_reduce<<<num_blocks_reduce, THREADS_PER_BLOCK_REDUCE>>>(F_D, Fnew_D, grid_size, error_reduction);
             cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce, stream);
-
+            
             cudaMemcpy(&error, error_d, sizeof(double), cudaMemcpyDeviceToHost);
-
             iterationsElapsed += ITERS_BETWEEN_UPDATE;
         } while (error > args.eps && iterationsElapsed < args.iterations);
 #ifdef NVPROF_
@@ -121,12 +135,12 @@ int main(int argc, char *argv[]){
     if (args.showResultArr) {
     cudaMemcpy(F_H, Fnew_D, size, cudaMemcpyDeviceToHost);
     int n = args.n;
-    for (int x = 0; x < args.n; x++) {
-        for (int y = 0; y < args.m; y++) {
-            std::cout << at(F_H, x, y) << ' ';
+        for (int x = 0; x < args.n; x++) {
+            for (int y = 0; y < args.m; y++) {
+                std::cout << at(F_H, x, y) << ' ';
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
-    }
     }
 
     cudaFree(F_D);
@@ -164,27 +178,27 @@ __global__ void iterate(double *F, double *Fnew, const cmdArgs *args){
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (j == 0 || i == 0 || i == args->n - 1 || j == args->n - 1) return; // Don't update borders
+    if (j == 0 || i == 0 || i == args->n - 1 || j == args->m - 1) return; // Don't update borders
 
     int n = args->n;
     at(Fnew, i, j) = 0.25 * (at(F, i + 1, j) + at(F, i - 1, j) + at(F, i, j + 1) + at(F, i, j - 1));
 }
 
 __global__ void block_reduce(const double *in1, const double *in2, const int n, double *out){
-    typedef cub::BlockReduce<double, 256> BlockReduce;
+    typedef cub::BlockReduce<double, THREADS_PER_BLOCK_REDUCE> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
 
     double max_diff = 0;
 
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
-        double diff = abs(in1[i] - in2[i]);
-        max_diff = fmax(diff, max_diff);
-    }
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    double diff = fabs(in1[i] - in2[i]);
+    max_diff = fmax(diff, max_diff);
 
     double block_max_diff = BlockReduce(temp_storage).Reduce(max_diff, cub::Max());
-
+    
     if (threadIdx.x == 0)
     {
-    out[blockIdx.x] = block_max_diff;
+        out[blockIdx.x] = block_max_diff;
     }
 }

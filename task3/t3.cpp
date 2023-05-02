@@ -131,8 +131,10 @@ int main(int argc, char *argv[]){
         acc_attach((void**)Fnew);
 #endif
 
+    // ВОТ ЭТО СМОТРИ ЭТО ВОТ ЭТО
     #pragma acc data present(inter[:n*m], Fnew[:n*m], F[:n*m]) async
         {
+    // а вот ЭТО это ВОТ ЭТО
     #pragma acc host_data use_device(Fnew, F, inter)
             {
 
