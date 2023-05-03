@@ -21,13 +21,22 @@
 
 #define NCCL_INC
 
+#ifdef THREAD_ANALOG_MODE
+constexpr int MAXIMUM_THREADS_PER_BLOCK = 1024;
+#define THREAD_PER_BLOCK_DEFINED(arr_lenght_dim_1, arr_lenght_dim_2, max_thread) (max_thread)
+#define BLOCK_COUNT_DEFINED(arr_lenght_dim_1, arr_lenght_dim_2, threads_count) (arr_lenght_dim_2/threads_count.x), arr_lenght_dim_1
+#else
+constexpr int MAXIMUM_THREADS_PER_BLOCK = 32;
+#define THREAD_PER_BLOCK_DEFINED(arr_lenght_dim_1, arr_lenght_dim_2, max_thread) ((arr_lenght_dim_1+max_thread-1)/max_thread), ((arr_lenght_dim_2+max_thread-1)/max_thread)
+#define BLOCK_COUNT_DEFINED(arr_lenght_dim_1, arr_lenght_dim_2, threads_count) ((arr_lenght_dim_1 + threads_count.x - 1) / threads_count.x), ((arr_lenght_dim_2 + threads_count.y - 1) / threads_count.y)
+#endif
+
 // Cornerns
 constexpr int LEFT_UP = 10;
 constexpr int LEFT_DOWN = 20;
 constexpr int RIGHT_UP = 20;
 constexpr int RIGHT_DOWN = 30;
 
-constexpr int MAXIMUM_THREADS_PER_BLOCK = 32;
 constexpr int THREADS_PER_BLOCK_REDUCE = 256;
 
 constexpr int ITERS_BETWEEN_UPDATE = 400;
@@ -209,21 +218,23 @@ int main(int argc, char *argv[]) {
     cudaMalloc(&d_temp_storage, temp_storage_bytes);
 
 
-    dim3 threadPerBlock {(local_args.n + MAXIMUM_THREADS_PER_BLOCK - 1)/MAXIMUM_THREADS_PER_BLOCK,
-                         (local_args.m + MAXIMUM_THREADS_PER_BLOCK - 1)/MAXIMUM_THREADS_PER_BLOCK}; // ПЕРЕОСМЫСЛИТЬ
-    if(threadPerBlock.x > 0){
-        threadPerBlock.x = 32;
+    dim3 threadPerBlock {THREAD_PER_BLOCK_DEFINED(local_args.n, local_args.m, MAXIMUM_THREADS_PER_BLOCK)}; // ПЕРЕОСМЫСЛИТЬ
+    if(threadPerBlock.x > MAXIMUM_THREADS_PER_BLOCK){
+        threadPerBlock.x = MAXIMUM_THREADS_PER_BLOCK;
     }
-    if(threadPerBlock.y > 0){
-        threadPerBlock.y = 32;
+    if(threadPerBlock.y > MAXIMUM_THREADS_PER_BLOCK){
+        threadPerBlock.y = MAXIMUM_THREADS_PER_BLOCK;
     } 
-    dim3 blocksPerGrid {(local_args.n + threadPerBlock.x - 1)/threadPerBlock.x,
-                        (local_args.m + threadPerBlock.y - 1)/threadPerBlock.y}; // ПЕРЕОСМЫСЛИТЬ
+    dim3 blocksPerGrid {BLOCK_COUNT_DEFINED(local_args.n, local_args.m, threadPerBlock)}; // ПЕРЕОСМЫСЛИТЬ
+
 
     DEBUG_PRINTF("%d: %d %d %d %d\n", rank, threadPerBlock.x, threadPerBlock.y, blocksPerGrid.x, blocksPerGrid.y);
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+#ifdef NVPROF_
+    nvtxRangePush("MainCycle");
+#endif
     do {
         iterate<<<blocksPerGrid, threadPerBlock>>>(F_D, Fnew_D, args_d);
 
@@ -258,6 +269,9 @@ int main(int argc, char *argv[]) {
             }
         }
     } while(error > global_args.eps && iterationsElapsed < global_args.iterations);
+#ifdef NVPROF_
+    nvtxRangePush("MainCycle");
+#endif
 
 }
 

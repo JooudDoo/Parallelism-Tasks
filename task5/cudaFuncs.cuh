@@ -250,8 +250,13 @@ void transfer_data_nccl_cuda(const int* rank, const int* ranks_count, double* F_
 
 __global__ void iterate(double *F, double *Fnew, const cmdArgs *args){
 
+#ifdef THREAD_ANALOG_MODE
+    size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t j = blockIdx.x * blockDim.x + threadIdx.x;
+#else
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
 
     if (j == 0 || i == 0 || i >= args->n - 1 || j >= args->m - 1) return; // Don't update borders
 
