@@ -57,10 +57,10 @@ __global__ void block_reduce(const double *in1, const double *in2, const int n, 
 15:  ################
 
 */
-void transfer_data(const int rank, const int ranks_count, double* F_from, double* F_to, cmdArgs& local_args){
+void transfer_data(const int rank, const int ranks_count, double* F_from, double* F_to, cmdArgs& local_args, cudaStream_t stream = 0){
 
     if(rank != 0){
-        cudaMemcpy(F_from + local_args.m, F_to + local_args.m, local_args.m * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaMemcpyAsync(F_from + local_args.m, F_to + local_args.m, local_args.m * sizeof(double), cudaMemcpyDeviceToHost, stream);
         MPI_Request rq;
         // отправляем указатель на вторую строку процессу, работующему сверху
         MPI_Isend(
@@ -77,7 +77,7 @@ void transfer_data(const int rank, const int ranks_count, double* F_from, double
     // отправляем свою вторую строку вниз 
     if(rank != ranks_count-1){
         MPI_Request rq;
-        cudaMemcpy(F_from + local_args.m*(local_args.n-2), F_to + local_args.m*(local_args.n-2), local_args.m * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaMemcpyAsync(F_from + local_args.m*(local_args.n-2), F_to + local_args.m*(local_args.n-2), local_args.m * sizeof(double), cudaMemcpyDeviceToHost, stream);
         MPI_Isend(
             F_from + local_args.m*(local_args.n-2),
             local_args.m,
@@ -89,18 +89,20 @@ void transfer_data(const int rank, const int ranks_count, double* F_from, double
         );
     }
 
+    // MPI_Barrier(MPI_COMM_WORLD);
+
     // принимаем строку от верхнего
     if(rank != 0){
         MPI_Status status;
         MPI_Recv(F_from, local_args.m, MPI_DOUBLE, rank-1, rank, MPI_COMM_WORLD, &status);
-        cudaMemcpy(F_to, F_from, local_args.m * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpyAsync(F_to, F_from, local_args.m * sizeof(double), cudaMemcpyHostToDevice, stream);
 
     }
     // принимаем строку от нижнего
     if(rank != ranks_count - 1){
         MPI_Status status;
         MPI_Recv(F_from+(local_args.m * (local_args.n-1)), local_args.m, MPI_DOUBLE, rank+1, rank, MPI_COMM_WORLD, &status);
-        cudaMemcpy(F_to+(local_args.m * (local_args.n-1)), F_from+(local_args.m * (local_args.n-1)), local_args.m * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpyAsync(F_to+(local_args.m * (local_args.n-1)), F_from+(local_args.m * (local_args.n-1)), local_args.m * sizeof(double), cudaMemcpyHostToDevice, stream);
     }
 }
 

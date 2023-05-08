@@ -270,7 +270,7 @@ int main(int argc, char *argv[]) {
         }
     } while(error > global_args.eps && iterationsElapsed < global_args.iterations);
 #ifdef NVPROF_
-    nvtxRangePush("MainCycle");
+    nvtxRangePop();
 #endif
 
 }
