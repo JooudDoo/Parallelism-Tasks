@@ -89,8 +89,6 @@ void transfer_data(const int rank, const int ranks_count, double* F_from, double
         );
     }
 
-    // MPI_Barrier(MPI_COMM_WORLD);
-
     // принимаем строку от верхнего
     if(rank != 0){
         MPI_Status status;
@@ -153,7 +151,7 @@ void transfer_data(const int rank, const int ranks_count, double* F_from, double
 15:  ################
 
 */
-void transfer_data_nccl(const int rank, const int ranks_count, double* F_from, double* F_to, cmdArgs& local_args, ncclComm_t comm){
+void transfer_data_nccl(const int rank, const int ranks_count, double* F_from, double* F_to, cmdArgs& local_args, ncclComm_t comm, cudaStream_t stream = 0){
     ncclGroupStart();
     if(rank != 0){
         ncclSend(
@@ -162,7 +160,7 @@ void transfer_data_nccl(const int rank, const int ranks_count, double* F_from, d
             ncclDouble,
             rank-1,
             comm,
-            0
+            stream
         );
     }
     if(rank != ranks_count-1){
@@ -172,7 +170,7 @@ void transfer_data_nccl(const int rank, const int ranks_count, double* F_from, d
             ncclDouble,
             rank+1,
             comm,
-            0
+            stream
         );
     }
 
@@ -183,7 +181,7 @@ void transfer_data_nccl(const int rank, const int ranks_count, double* F_from, d
             ncclDouble,
             rank-1,
             comm,
-            0
+            stream
         );
     }
 
@@ -194,7 +192,7 @@ void transfer_data_nccl(const int rank, const int ranks_count, double* F_from, d
             ncclDouble,
             rank+1,
             comm,
-            0
+            stream
         );
     }
     ncclGroupEnd();

@@ -217,6 +217,8 @@ int main(int argc, char *argv[]) {
     cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce);
     cudaMalloc(&d_temp_storage, temp_storage_bytes);
 
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
 
     dim3 threadPerBlock {THREAD_PER_BLOCK_DEFINED(local_args.n, local_args.m, MAXIMUM_THREADS_PER_BLOCK)}; // ПЕРЕОСМЫСЛИТЬ
     if(threadPerBlock.x > MAXIMUM_THREADS_PER_BLOCK){
@@ -227,7 +229,6 @@ int main(int argc, char *argv[]) {
     } 
     dim3 blocksPerGrid {BLOCK_COUNT_DEFINED(local_args.n, local_args.m, threadPerBlock)}; // ПЕРЕОСМЫСЛИТЬ
 
-
     DEBUG_PRINTF("%d: %d %d %d %d\n", rank, threadPerBlock.x, threadPerBlock.y, blocksPerGrid.x, blocksPerGrid.y);
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -236,20 +237,21 @@ int main(int argc, char *argv[]) {
     nvtxRangePush("MainCycle");
 #endif
     do {
-        iterate<<<blocksPerGrid, threadPerBlock>>>(F_D, Fnew_D, args_d);
+        iterate<<<blocksPerGrid, threadPerBlock, 0, stream>>>(F_D, Fnew_D, args_d);
 
         // ОБМЕН ГРАНИЧНЫМИ УСЛОВИЯМИ
-        transfer_data_nccl(rank, ranks_count, Fnew_D, Fnew_D, local_args, comm);
+        transfer_data_nccl(rank, ranks_count, Fnew_D, Fnew_D, local_args, comm, stream);
 
-        iterate<<<blocksPerGrid, threadPerBlock>>>(Fnew_D, F_D, args_d);
+        iterate<<<blocksPerGrid, threadPerBlock, 0, stream>>>(Fnew_D, F_D, args_d);
 
         // ОБМЕН ГРАНИЧНЫМИ УСЛОВИЯМИ
-        transfer_data_nccl(rank, ranks_count, F_D, F_D, local_args, comm);
+        transfer_data_nccl(rank, ranks_count, F_D, F_D, local_args, comm, stream);
 
         iterationsElapsed += 2;
         if(iterationsElapsed % ITERS_BETWEEN_UPDATE == 0){
-            block_reduce<<<num_blocks_reduce, THREADS_PER_BLOCK_REDUCE>>>(F_D, Fnew_D, ELEMENTS_BY_PROCESS, error_reduction);
-            cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce);
+            block_reduce<<<num_blocks_reduce, THREADS_PER_BLOCK_REDUCE, 0, stream>>>(F_D, Fnew_D, ELEMENTS_BY_PROCESS, error_reduction);
+            cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce, stream);
+            cudaStreamSynchronize(stream);
             cudaMemcpy(&error, error_d, sizeof(double), cudaMemcpyDeviceToHost);
 
 // ------------------
@@ -265,6 +267,7 @@ int main(int argc, char *argv[]) {
                     }
                     DEBUG1_PRINTF("iters: %d error: %lf\n", iterationsElapsed, error);
                 }
+                MPI_Barrier(MPI_COMM_WORLD);
                 MPI_Bcast(&error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
             }
         }
@@ -272,7 +275,7 @@ int main(int argc, char *argv[]) {
 #ifdef NVPROF_
     nvtxRangePop();
 #endif
-
+    cudaStreamDestroy(stream); 
 }
 
 

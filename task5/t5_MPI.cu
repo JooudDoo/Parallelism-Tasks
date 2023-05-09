@@ -224,6 +224,9 @@ int main(int argc, char *argv[]) {
     dim3 blocksPerGrid {BLOCK_COUNT_DEFINED(local_args.n, local_args.m, threadPerBlock)}; // ПЕРЕОСМЫСЛИТЬ
 
     DEBUG_PRINTF("%d: %d %d %d %d\n", rank, threadPerBlock.x, threadPerBlock.y, blocksPerGrid.x, blocksPerGrid.y);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    
 #ifdef NVPROF_
     nvtxRangePush("MainCycle");
 #endif
@@ -243,6 +246,7 @@ int main(int argc, char *argv[]) {
         if(iterationsElapsed % ITERS_BETWEEN_UPDATE == 0){
             block_reduce<<<num_blocks_reduce, THREADS_PER_BLOCK_REDUCE, 0, stream>>>(F_D, Fnew_D, ELEMENTS_BY_PROCESS, error_reduction);
             cub::DeviceReduce::Max(d_temp_storage, temp_storage_bytes, error_reduction, error_d, num_blocks_reduce, stream);
+            cudaStreamSynchronize(stream);
             cudaMemcpy(&error, error_d, sizeof(double), cudaMemcpyDeviceToHost);
 
 // ------------------
@@ -258,8 +262,8 @@ int main(int argc, char *argv[]) {
                     }
                     DEBUG1_PRINTF("iters: %d error: %lf\n", iterationsElapsed, error);
                 }
-                MPI_Bcast(&error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
                 MPI_Barrier(MPI_COMM_WORLD);
+                MPI_Bcast(&error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
             }
         }
     } while(error > global_args.eps && iterationsElapsed < global_args.iterations);
