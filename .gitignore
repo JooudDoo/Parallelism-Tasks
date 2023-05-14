@@ -2,3 +2,4 @@
 .vscode/settings.json
 bin/
 c.txt
+build/
