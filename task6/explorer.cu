@@ -1,9 +1,9 @@
-#include "MST/MST.cuh"
+#include "TcuBlas.cuh"
 
 #include <iostream>
 
 int main(){
-    FullyConnectedLayer a {2, 16, false};
+    FullyConnectedLayer a;
 
     return 0;
 }
